@@ -80,3 +80,17 @@ def test_out_of_scope_request_returns_no_patient_data(client):
                                                      "task": "What will the weather be in Vienna tomorrow?"}).json()
     assert not j["facts"] and [b["kind"] for b in j["blocks"]] == ["summary"]
     assert "could not be related" in j["blocks"][0]["sentences"][0]["text"]
+
+
+def test_review_queue_reports_reviewed_and_pending_items_with_comment(client):
+    items = client.get("/api/v1/patients/patient-syn-A/review-items").json()
+    if not items:
+        pytest.skip("synthetic patient has no conflicts")
+    assert all(i["reviewStatus"] == "pending" for i in items)
+    first = items[0]["id"]
+    r = client.post(f"/api/v1/review-items/{first}/decision",
+                    json={"reviewItemId": first, "factId": items[0]["fact"]["id"], "decision": "escalate", "comment": "check with GP"})
+    assert r.status_code == 200
+    after = {i["id"]: i for i in client.get("/api/v1/patients/patient-syn-A/review-items").json()}
+    assert after[first]["reviewStatus"] == "escalated" and "check with GP" in after[first]["reviewComment"]
+    assert after[first]["fact"]["approval"] == "unreviewed"  # escalation is not an approval

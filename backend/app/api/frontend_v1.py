@@ -23,6 +23,7 @@ from backend.app.layer6_verification.verify import ClaimVerifier
 VERIF = {"supported": "documented", "contradicted": "conflicting", "not_addressed": "unable_to_verify",
          "verification_incomplete": "needs_review"}
 APPROVAL = {"accepted": "approved", "rejected": "rejected"}
+REVIEW_STATUS = {"accepted": "approved", "rejected": "rejected", "needs_more_info": "escalated"}
 DECISION = {"approve": "accepted", "reject": "rejected", "correct": "needs_more_info", "escalate": "needs_more_info"}
 SEX = {"weiblich": "female", "w": "female", "female": "female", "männlich": "male", "m": "male", "male": "male"}
 
@@ -328,11 +329,15 @@ def register_frontend_api(app: FastAPI, store: ClinicalStore, llm=None) -> None:
             for c in cits:
                 c.verified = verifier.verify_citation(c)
             ev = [e for e in (docs.evidence(c, "conflicting", "L6 conflict detection") for c in cits) if e]
-            st = status.get(k.conflict_id, {}).get("status", "pending")
+            rec = status.get(k.conflict_id, {})
+            st = rec.get("status", "pending")
             out.append({"id": f"{pid}|{k.conflict_id}", "patientId": pid, "reason": k.explanation,
                         "createdAt": status.get(k.conflict_id, {}).get("updated_at") or datetime.now(timezone.utc).isoformat(),
                         "fact": {"id": k.conflict_id, "statement": k.title, "category": k.kind, "verification": "conflicting",
-                                 "approval": APPROVAL.get(st, "unreviewed"), "evidence": ev}})
+                                 "approval": APPROVAL.get(st, "unreviewed"), "evidence": ev},
+                        # reviewed vs pending for the queue; escalations keep approval "unreviewed" (not approved)
+                        "reviewStatus": REVIEW_STATUS.get(st, "pending"),
+                        "reviewComment": next((h["comment"] for h in reversed(rec.get("history", [])) if h.get("comment")), None)})
         return out
 
     @app.post("/api/v1/review-items/{item_id}/decision")
